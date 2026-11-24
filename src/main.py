@@ -36,6 +36,10 @@ def _apply_overrides(cfg: dict, args) -> dict:
         cfg["ai"]["provider"] = args.provider
     if getattr(args, "model", None):
         cfg["ai"]["model"] = args.model
+    if getattr(args, "temperature", None) is not None:
+        cfg["ai"]["temperature"] = args.temperature
+    if getattr(args, "ai_debug_dir", None):
+        cfg["ai"]["debug_dir"] = args.ai_debug_dir
     if getattr(args, "max_vacancies", None):
         cfg["max_vacancies"] = args.max_vacancies
     if getattr(args, "pages", None):
@@ -112,6 +116,16 @@ def run_schedule(cfg: dict, output: str, cron: str) -> int:
             time.sleep(20)
 
 
+def _temperature_arg(value: str) -> float:
+    try:
+        number = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("температура должна быть числом от 0 до 2") from exc
+    if not 0 <= number <= 2:
+        raise argparse.ArgumentTypeError("температура должна быть числом от 0 до 2")
+    return number
+
+
 def main(argv: list[str] | None = None) -> int:
     common = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
     common.add_argument("--config",)
@@ -120,6 +134,9 @@ def main(argv: list[str] | None = None) -> int:
     common.add_argument("--ai", action="store_true", help="включить ИИ (по умолчанию включён)")
     common.add_argument("--provider", choices=["local", "api", "off"],)
     common.add_argument("--model",)
+    common.add_argument("--temperature", type=_temperature_arg,
+                        help="температура модели от 0 до 2; 0 отключает случайную выборку")
+    common.add_argument("--ai-debug-dir", help="сохранить сырые ответы ИИ и поля вакансий; могут содержать личные данные")
     common.add_argument("--max-vacancies", type=int,)
     common.add_argument("--pages", type=int,)
     common.add_argument("--source-url",)

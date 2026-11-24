@@ -21,6 +21,9 @@ import logging
 import os
 import re
 import urllib.request
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 
 from .normalize import _ALIASES
 from .rules import TOPIC_ORDER
@@ -117,22 +120,25 @@ def _vacancy_text(v: dict) -> str:
     return json.dumps(_source_fields(v), ensure_ascii=False, indent=2)
 
 
-def _valid_remark(r: dict, v: dict) -> dict | None:
-    """Консервативный фильтр: привязка к источнику, а не проверка смысла ИИ."""
+def _validate_remark(r: dict, v: dict) -> tuple[dict | None, str | None]:
+    """Синтаксические проверки источника; смысл необходимо проверить отдельно."""
     if not isinstance(r, dict):
-        return None
+        return None, "not_object"
     if any(not isinstance(r.get(k), str) for k in ("topic", "field", "quote", "problem", "recommendation")):
-        return None
+        return None, "missing_or_nonstring"
     topic, field, quote, problem, rec = (r[k].strip() for k in
                                         ("topic", "field", "quote", "problem", "recommendation"))
     fields = _source_fields(v)
-    if topic not in TOPIC_ORDER or not field or not quote or not problem or not rec:
-        return None
-    if field not in fields or quote not in fields[field]:
-        return None
-    # Противоречия/пропуски оставлены правилам: модель не всегда приводит оба значения.
+    if topic not in TOPIC_ORDER:
+        return None, "unknown_topic"
+    if not field or not quote or not problem or not rec:
+        return None, "empty_field"
+    if field not in fields:
+        return None, "unknown_source_field"
+    if quote not in fields[field]:
+        return None, "quote_not_in_field"
     if re.search(r"противореч|несовместим", problem + " " + rec, re.I):
-        return None
+        return None, "unverified_contradiction"
     root = re.split(r"[.\[]", field, maxsplit=1)[0]
     allowed = {alias for canon in _TOPIC_KEYS[topic] for alias in _ALIASES[canon]}
     allowed.update(_ALIASES["description"])
@@ -141,33 +147,69 @@ def _valid_remark(r: dict, v: dict) -> dict | None:
     if topic == "Место работы":
         allowed.add("addresses")
     if root not in allowed:
-        return None
+        return None, "field_topic_mismatch"
     sev = str(r.get("severity", "средняя")).lower()
     if sev not in ("высокая", "средняя", "низкая"):
         sev = "средняя"
     return {"topic": topic, "field": field, "quote": quote,
-            "problem": problem, "recommendation": rec, "severity": sev, "source": "ai"}
+            "problem": problem, "recommendation": rec, "severity": sev, "source": "ai"}, None
 
 
-def _accepted_remarks(text: str, v: dict) -> list[dict]:
-    candidates = _parse_model_json(text)
-    remarks = [valid for r in candidates if (valid := _valid_remark(r, v)) is not None]
+def _valid_remark(r: dict, v: dict) -> dict | None:
+    return _validate_remark(r, v)[0]
+
+
+def _write_ai_debug(debug_dir, v: dict, text: str, parse_error, outcomes, model_name=None) -> None:
+    """Только по явному запросу: исходные поля и ответ модели могут быть чувствительными."""
+    if not debug_dir:
+        return
+    try:
+        directory = Path(debug_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"ai-response-{uuid.uuid4().hex}.json"
+        data = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "model": model_name, "vacancy_id": v.get("id", ""),
+                "input_fields": _source_fields(v), "raw_response": text,
+                "parse_error": parse_error, "candidates": outcomes}
+        with path.open("x", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        log.info("Диагностика ИИ сохранена: %s", path)
+    except (OSError, TypeError, ValueError) as exc:
+        # Невозможность записать диагностику не должна ломать отчёт или подменять ИИ fallback'ом.
+        log.warning("Не удалось сохранить диагностику ИИ: %s", exc)
+
+
+def _accepted_remarks(text: str, v: dict, debug_dir=None, model_name=None) -> list[dict]:
+    try:
+        candidates = _parse_model_json(text)
+    except ValueError as exc:
+        _write_ai_debug(debug_dir, v, text, str(exc), [], model_name)
+        raise
+    remarks, outcomes = [], []
+    for candidate in candidates:
+        valid, reason = _validate_remark(candidate, v)
+        outcomes.append({"candidate": candidate, "accepted": valid is not None, "rejection_reason": reason})
+        if valid is not None:
+            remarks.append(valid)
+    _write_ai_debug(debug_dir, v, text, None, outcomes, model_name)
     log.info("Ответ модели по вакансии %s: предложено %d, принято %d", v.get("id", ""),
              len(candidates), len(remarks))
     return remarks
 
 
 def _parse_model_json(text: str) -> list[dict]:
-    m = re.search(r"\[.*\]", text, re.S)
-    if not m:
+    # Допускаем текст/markdown вокруг одного массива, но не принимаем вложенный
+    # кусок обрезанного JSON за самостоятельный корректный ответ.
+    start = text.find("[")
+    if start < 0:
         raise ValueError("Модель не вернула JSON-массив")
     try:
-        data = json.loads(m.group(0))
+        value, _ = json.JSONDecoder().raw_decode(text, start)
     except json.JSONDecodeError as exc:
-        raise ValueError("Модель вернула некорректный JSON") from exc
-    if not isinstance(data, list):
+        raise ValueError("Модель вернула некорректный JSON-массив") from exc
+    if not isinstance(value, list):
         raise ValueError("Модель вернула не массив")
-    return data
+    return value
 
 
 class FallbackAnalyzer:
@@ -198,11 +240,13 @@ class GemmaLocalAnalyzer:
 
     name = "gemma-local"
 
-    def __init__(self, model: str, max_new_tokens: int = 512, temperature: float = 0.3):
+    def __init__(self, model: str, max_new_tokens: int = 512, temperature: float = 0.3,
+                 debug_dir: str | None = None):
         self.model_name = model
         self.name = "gemma-local" if "gemma" in model.lower() else "transformers-local"
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
+        self.debug_dir = debug_dir
         self._pipe = None
 
     def _load(self):
@@ -242,12 +286,13 @@ class GemmaLocalAnalyzer:
                 prompt = tokenizer.apply_chat_template(merged, tokenize=False, add_generation_prompt=True)
             except Exception:
                 prompt = merged[0]["content"]
-        result = pipe(prompt, max_new_tokens=self.max_new_tokens,
-                      do_sample=self.temperature > 0,
-                      temperature=self.temperature if self.temperature > 0 else None,
-                      return_full_text=False)
+        generation = {"max_new_tokens": self.max_new_tokens,
+                      "do_sample": self.temperature > 0, "return_full_text": False}
+        if self.temperature > 0:
+            generation["temperature"] = self.temperature
+        result = pipe(prompt, **generation)
         generated = result[0]["generated_text"] if result else ""
-        return _accepted_remarks(generated, v)
+        return _accepted_remarks(generated, v, self.debug_dir, self.model_name)
 
 
 class ApiAnalyzer:
@@ -255,10 +300,13 @@ class ApiAnalyzer:
 
     name = "api"
 
-    def __init__(self, base_url: str, api_key: str, model: str):
+    def __init__(self, base_url: str, api_key: str, model: str, debug_dir: str | None = None,
+                 temperature: float = 0.3):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        self.debug_dir = debug_dir
+        self.temperature = temperature
 
     def analyze(self, v: dict) -> list[dict]:
         payload = json.dumps({
@@ -267,7 +315,7 @@ class ApiAnalyzer:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": f"Вакансия:\n{_vacancy_text(v)}\n\nВерни JSON-массив замечаний."},
             ],
-            "temperature": 0.3,
+            "temperature": self.temperature,
         }).encode("utf-8")
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions", data=payload,
@@ -276,7 +324,7 @@ class ApiAnalyzer:
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         content = data["choices"][0]["message"]["content"]
-        return _accepted_remarks(content, v)
+        return _accepted_remarks(content, v, self.debug_dir, self.model)
 
 
 def build_ai_analyzer(ai_cfg: dict):
@@ -290,7 +338,9 @@ def build_ai_analyzer(ai_cfg: dict):
             log.warning("OPENAI_API_KEY не задан — использую fallback")
             return FallbackAnalyzer(), "fallback (нет ключа API)"
         return ApiAnalyzer(os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
-                           key, os.getenv("OPENAI_MODEL", "google/gemma-2-9b-it:free")), "api"
+                           key, os.getenv("OPENAI_MODEL", "google/gemma-2-9b-it:free"),
+                           ai_cfg.get("debug_dir"), float(ai_cfg.get("temperature", 0.3))), "api"
     return GemmaLocalAnalyzer(ai_cfg.get("model", "google/gemma-2-2b-it"),
                               int(ai_cfg.get("max_new_tokens", 512)),
-                              float(ai_cfg.get("temperature", 0.3))), "gemma-local"
+                              float(ai_cfg.get("temperature", 0.3)),
+                              ai_cfg.get("debug_dir")), "gemma-local"
