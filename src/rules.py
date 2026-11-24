@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import re
 
+from .normalize import _ALIASES
+
 TOPIC_ORDER = ["Название", "Обязанности", "Требования", "Оплата", "График",
                "Место работы", "Тип занятости", "Описание"]
 
@@ -45,6 +47,18 @@ def _has(patterns, text: str) -> str | None:
 
 def _numbers(text: str) -> list[int]:
     return [int(x) for x in re.findall(r"\d[\d\s\u00a0]*", text or "") if x.strip()]
+
+
+def _source_name(v: dict, aliases: list[str], default: str) -> str:
+    raw = v.get("raw", {})
+    return next((name for name in aliases if name in raw and raw[name] not in (None, "")), default)
+
+
+def _source_for_quote(v: dict, quote: str, default: str) -> str:
+    for name, value in v.get("raw", {}).items():
+        if isinstance(value, str) and quote in value:
+            return name
+    return default
 
 
 def analyze_rules(v: dict) -> list[dict]:
@@ -112,7 +126,12 @@ def analyze_rules(v: dict) -> list[dict]:
                           "Указан только нижний порог оплаты, верхний не понятен.",
                           "Укажите вилку «от–до» или условия, от которых зависит сумма.", "средняя"))
     if smin is not None and smax is not None and smin > smax:
-        out.append(_r("Оплата", "salary", f"{smin:g} | {smax:g}",
+        min_field = _source_name(v, ["salaryMin", "salary_min", "salary_from", "salaryFrom", "minSalary", "зарплатаОт"], "salaryMin")
+        max_field = _source_name(v, ["salaryMax", "salary_max", "salary_to", "salaryTo", "maxSalary", "зарплатаДо"], "salaryMax")
+        raw = v.get("raw", {})
+        min_value = str(raw.get(min_field, f"{smin:g}"))
+        max_value = str(raw.get(max_field, f"{smax:g}"))
+        out.append(_r("Оплата", f"{min_field} | {max_field}", f"{min_value} | {max_value}",
                       "Противоречие: минимальная оплата больше максимальной.",
                       "Проверьте и исправьте значения минимальной и максимальной оплаты.", "высокая"))
 
@@ -146,8 +165,13 @@ def analyze_rules(v: dict) -> list[dict]:
                           "Укажите город и адрес (или район) места работы.", "средняя"))
         if "удалённо" in place_all.lower() and re.search(r"в офисе|на предприятии", place_all, re.I) \
                 and "удалённо" not in place.lower():
-            out.append(_r("Место работы", "workPlace", f"{re.search(r'удалённо', place_all, re.I).group()} | {re.search(r'в офисе|на предприятии', place_all, re.I).group()}",
-                          "Противоречие: в тексте есть и удалённая работа, и работа в офисе.",
+            remote = re.search(r"удалённо", place_all, re.I).group()
+            office = re.search(r"в офисе|на предприятии", place_all, re.I).group()
+            remote_field = _source_for_quote(v, remote, "description")
+            office_field = _source_for_quote(v, office, "workPlace")
+            fields = remote_field if remote_field == office_field else f"{remote_field} | {office_field}"
+            out.append(_r("Место работы", fields, f"{remote} | {office}",
+                          "Указаны удалённая работа и работа в офисе, но порядок их сочетания неясен.",
                           "Уточните формат: удалённо, гибридно или в офисе (и в каком).", "средняя"))
 
     # --- Тип занятости ---
@@ -158,9 +182,12 @@ def analyze_rules(v: dict) -> list[dict]:
                       "Укажите: полная/частичная занятость, срочный договор, стажировка и т.п.", "высокая"))
     else:
         el = emp.lower()
-        if "частичн" in el and re.search(r"40\s*час|полн\w+ (день|недел)", all_text, re.I):
-            out.append(_r("Тип занятости", "employmentType", emp + " | " + re.search(r"40\s*час|полн\w+ (день|недел)", all_text, re.I).group(),
-                          "Противоречие: указана частичная занятость, но в тексте — полная нагрузка.",
+        workload = re.search(r"40\s*час(?:ов|а)?|полн\w+ (?:день|недел\w*)", all_text, re.I)
+        if "частичн" in el and workload:
+            emp_field = _source_name(v, _ALIASES["employment_type"], "employmentType")
+            workload_field = _source_for_quote(v, workload.group(), "description")
+            out.append(_r("Тип занятости", f"{emp_field} | {workload_field}", emp + " | " + workload.group(),
+                          "Указана частичная занятость, но также приведена полная нагрузка; соотношение неясно.",
                           "Проверьте тип занятости и количество часов в неделю.", "средняя"))
 
     # --- Описание ---

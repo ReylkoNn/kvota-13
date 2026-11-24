@@ -63,7 +63,7 @@ class IntegrationTest(unittest.TestCase):
             name = "mock-model"
             def analyze(self, v):
                 return [{"topic":"Описание", "field":"description", "quote":"нестандартные часы", "problem":"Неясно", "recommendation":"Укажите часы", "source":"ai", "severity":"средняя"}]
-        v = normalize_vacancy({"id": "1", "description": "нестандартные часы"})
+        v = normalize_vacancy({"id": "1", "description": "нестандартные часы " + "x" * 100})
         with patch("src.analyzer.build_ai_analyzer", return_value=(MockModel(), "mock-model")):
             result, status = analyze_batch([v], {"enabled": True})
         self.assertTrue(any(r["source"] == "ai" for r in result[0]["remarks"]))

@@ -15,8 +15,11 @@ log = logging.getLogger("kvota13.analyzer")
 
 
 def _key(r: dict) -> tuple:
-    return (r.get("topic", "").lower(), r.get("field", "").lower(),
-            r.get("quote", "").lower()[:60], r.get("problem", "").lower()[:60])
+    """Объединяем точные повторы по теме, полю и цитате; пропуски различаем по проблеме."""
+    clean = lambda value: " ".join(str(value or "").casefold().split())
+    quote = clean(r.get("quote"))
+    return (clean(r.get("topic")), clean(r.get("field")), quote,
+            "" if quote else clean(r.get("problem")))
 
 
 
