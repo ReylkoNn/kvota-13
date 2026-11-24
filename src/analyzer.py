@@ -19,12 +19,90 @@ def _key(r: dict) -> tuple:
             r.get("quote", "").lower()[:60], r.get("problem", "").lower()[:60])
 
 
+
+def _question_options(r: dict) -> dict[str, str] | None:
+    """Два редакторских вопроса только для известных срабатываний правил.
+
+    Оба варианта - уточнения, не факты о вакансии. Противоречия намеренно
+    не меняем: для них нужно сохранить рекомендации о проверке двух значений.
+    """
+    if r.get("source") != "rule":
+        return None
+    topic, problem = r.get("topic", ""), r.get("problem", "")
+    if "Противоречие" in problem:
+        return None
+    choices = None
+    if topic == "Обязанности" and (problem.startswith("Не описаны обязанности") or
+                                     problem.startswith("Формулировка обязанностей")):
+        choices = ("Перечислите основные задачи сотрудника.",
+                   "Уточните основные задачи сотрудника и зоны его ответственности.")
+    elif topic == "Требования" and (problem.startswith("Не указаны требования") or
+                                       problem.startswith("Перечислены только личные качества") or
+                                       problem.startswith("Не понятно, нужен ли опыт")):
+        choices = ("Уточните обязательные навыки и требуемый опыт работы.",
+                   "Уточните обязательные навыки и требования к образованию.")
+    elif topic == "Оплата" and (problem.startswith("Не указана оплата") or
+                                 problem.startswith("Оплата описана расплывчато")):
+        choices = ("Укажите конкретную сумму или вилку оплаты.",
+                   "Укажите сумму оплаты и условия, от которых зависит её размер.")
+    elif topic == "Оплата" and problem.startswith("Указан только нижний порог"):
+        choices = ("Уточните верхнюю границу оплаты или вилку дохода.",
+                   "Уточните, от каких условий зависит оплата выше указанного минимума.")
+    elif topic == "График" and (problem.startswith("Не указан график") or
+                                 problem.startswith("Формулировка «")):
+        choices = ("Укажите дни недели, часы работы и продолжительность смен.",
+                   "Уточните дни и часы смен и порядок формирования графика.")
+    elif topic == "Место работы" and (problem.startswith("Не указано место") or
+                                       problem.startswith("Место указано общо")):
+        choices = ("Укажите город и адрес или район места работы.",
+                   "Уточните город, место и формат работы: в офисе или удалённо.")
+    elif topic == "Тип занятости" and problem.startswith("Не указан тип занятости"):
+        choices = ("Укажите тип занятости: полная или частичная.",
+                   "Уточните тип занятости и предполагаемую длительность работы.")
+    return dict(zip(("A", "B"), choices)) if choices else None
+
+
+def _apply_ai_question_choice(v: dict, remarks: list[dict], analyzer) -> bool:
+    """Модель выбирает один шаблон; это не представляется как сгенерированное замечание."""
+    choose = getattr(analyzer, "choose_option", None)
+    if not callable(choose):
+        return False
+    for r in remarks:
+        options = _question_options(r)
+        if not options:
+            continue
+        try:
+            choice = choose(v, r, options)
+        except Exception as exc:
+            log.warning("ИИ не смог выбрать уточнение (%s); оставлена рекомендация правила", exc)
+            return False
+        if not isinstance(choice, str) or choice not in options:
+            log.warning("ИИ не вернул однозначный выбор A/B; оставлена рекомендация правила")
+            return False
+        if options[choice] == r["recommendation"]:
+            return False
+        r["recommendation_original"] = r["recommendation"]
+        r["recommendation"] = options[choice]
+        r["recommendation_source"] = "ai-template-choice"
+        r["recommendation_choice"] = choice
+        model_name = getattr(analyzer, "model_name", None) or getattr(analyzer, "model", None)
+        if model_name:
+            r["recommendation_model"] = model_name
+        log.info("ИИ выбрал вариант уточнения %s для вакансии %s (тема: %s)",
+                 choice, v.get("id", ""), r.get("topic", ""))
+        return True
+    return False
+
 def analyze_vacancy(v: dict, ai_cfg: dict, ai_analyzer=None) -> tuple[list[dict], str]:
     """Вернуть (замечания, ai_status). ai_status: gemma-local|api|fallback|off."""
     remarks = analyze_rules(v)
     status = "off"
     if ai_cfg.get("enabled", True) and ai_cfg.get("provider") != "off":
         analyzer = ai_analyzer or build_ai_analyzer(ai_cfg)[0]
+        # Выбор A/B независим от свободной генерации JSON: если вторая часть
+        # не удалась, он остаётся отражён в отчёте, а статус становится mixed.
+        selected = (getattr(analyzer, "name", "") != "fallback" and
+                    _apply_ai_question_choice(v, remarks, analyzer))
         try:
             ai_remarks = analyzer.analyze(v)
             status = getattr(analyzer, "name", "ai")
@@ -41,7 +119,7 @@ def analyze_vacancy(v: dict, ai_cfg: dict, ai_analyzer=None) -> tuple[list[dict]
                 for r in fb:
                     if _key(r) not in seen:
                         remarks.append(r)
-                status = "fallback"
+                status = "mixed" if selected else "fallback"
             except Exception:
                 status = "fallback-error"
     else:

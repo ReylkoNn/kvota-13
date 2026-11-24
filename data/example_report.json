@@ -1,13 +1,15 @@
 {
   "meta": {
-    "generated_at": "2026-11-24T11:55:18+00:00",
+    "generated_at": "2026-11-24T14:50:53+00:00",
     "mode": "check",
     "source": "local:data/example_input.json",
     "ai_status": "fallback",
     "total": 5,
     "with_remarks": 4,
     "without_remarks": 1,
-    "total_remarks": 18
+    "total_remarks": 18,
+    "ai_generated_remarks": 0,
+    "ai_selected_recommendations": 0
   },
   "vacancies": [
     {

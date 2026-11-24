@@ -26,6 +26,10 @@ def build_report(results: list[dict], mode: str, source: str, ai_status: str) ->
             "with_remarks": sum(1 for r in results if r["remarks"]),
             "without_remarks": sum(1 for r in results if not r["remarks"]),
             "total_remarks": sum(len(r["remarks"]) for r in results),
+            "ai_generated_remarks": sum(1 for v in results for r in v["remarks"]
+                                        if r.get("source") == "ai"),
+            "ai_selected_recommendations": sum(1 for v in results for r in v["remarks"]
+                                               if r.get("recommendation_source") == "ai-template-choice"),
         },
         "vacancies": results,
     }
