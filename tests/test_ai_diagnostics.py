@@ -54,6 +54,24 @@ class TestDiagnostics(unittest.TestCase):
         self.assertEqual(_parse_model_json('```json\n[]\n```\nготово'), [])
         self.assertEqual(_parse_model_json('результат: []\nдругая заметка [x]'), [])
 
+    def test_gemma_unescaped_inner_quotes_trigger_fallback_not_partial_json(self):
+        # Сокращённый синтетический пример полученного ответа: первый объект
+        # корректен, второй содержит неэкранированные кавычки и не закрыт верно.
+        text = ('```json\n[{"topic":"График","field":"scheduleType",'
+                '"quote":"Гибкий график","problem":"Неясны детали",'
+                '"recommendation":"Уточните график"},'
+                '{"topic":"Описание","field":"description",'
+                '"quote":"Полный соцпакет","problem":"Неясны детали",'
+                '"recommendation":"Уточните условия "полного соцпакета.",'
+                '"severity":"средняя"}]\n```')
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(ValueError):
+                _accepted_remarks(text, self.v, folder)
+            record = json.loads(next(Path(folder).glob('*.json')).read_text(encoding='utf-8'))
+            self.assertEqual(record['raw_response'], text)
+            self.assertEqual(record['candidates'], [])
+            self.assertIsNotNone(record['parse_error'])
+
     def test_debug_write_failure_does_not_discard_valid_model_response(self):
         with tempfile.TemporaryDirectory() as folder:
             not_a_directory = Path(folder) / "file"
