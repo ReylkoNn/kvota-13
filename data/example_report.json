@@ -1,13 +1,13 @@
 {
   "meta": {
-    "generated_at": "2026-11-24T15:56:25+00:00",
+    "generated_at": "2026-11-24T21:11:20+00:00",
     "mode": "check",
     "source": "local:data/example_input.json",
     "ai_status": "fallback",
     "total": 5,
     "with_remarks": 4,
     "without_remarks": 1,
-    "total_remarks": 18,
+    "total_remarks": 16,
     "ai_generated_remarks": 0,
     "ai_selected_recommendations": 0
   },
@@ -44,24 +44,6 @@
           "recommendation": "Укажите конкретную сумму или вилку оплаты.",
           "severity": "высокая",
           "source": "rule"
-        },
-        {
-          "topic": "Оплата",
-          "field": "description",
-          "quote": "Стабильная зарплата",
-          "problem": "«Стабильная зарплата» не говорит о сумме.",
-          "recommendation": "Укажите сумму или вилку оплаты.",
-          "severity": "средняя",
-          "source": "fallback"
-        },
-        {
-          "topic": "Оплата",
-          "field": "description",
-          "quote": "своевременная оплата",
-          "problem": "«Своевременная оплата» не говорит о сумме.",
-          "recommendation": "Укажите сумму или вилку оплаты.",
-          "severity": "средняя",
-          "source": "fallback"
         },
         {
           "topic": "График",
@@ -180,9 +162,9 @@
           "topic": "Тип занятости",
           "field": "employmentType",
           "quote": "",
-          "problem": "Не указан тип занятости.",
-          "recommendation": "Укажите: полная/частичная занятость, срочный договор, стажировка и т.п.",
-          "severity": "высокая",
+          "problem": "Не удалось найти тип занятости в проверенных полях.",
+          "recommendation": "Проверьте и уточните тип занятости: полная, частичная или другой вариант.",
+          "severity": "средняя",
           "source": "rule"
         },
         {

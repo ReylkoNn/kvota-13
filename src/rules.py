@@ -214,10 +214,10 @@ def analyze_rules(v: dict) -> list[dict]:
 
     # --- Тип занятости ---
     emp = v.get("employment_type", "")
-    desc_employment = re.search(r"(?:полная|частичная|временная) занятость", desc, re.I)
-    if not emp.strip() and not desc_employment:
-        out.append(_r("Тип занятости", "employmentType", "", "Не указан тип занятости.",
-                      "Укажите: полная/частичная занятость, срочный договор, стажировка и т.п.", "высокая"))
+    text_employment = re.search(r"(?:полная|частичная|временная)\s+занятость", all_text, re.I)
+    if not emp.strip() and not text_employment:
+        out.append(_r("Тип занятости", "employmentType", "", "Не удалось найти тип занятости в проверенных полях.",
+                      "Проверьте и уточните тип занятости: полная, частичная или другой вариант.", "средняя"))
     else:
         el = emp.lower()
         workload = re.search(r"40\s*час(?:ов|а)?|полн\w+ (?:день|недел\w*)", all_text, re.I)

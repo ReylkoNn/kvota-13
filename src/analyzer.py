@@ -52,6 +52,41 @@ def _generic_missing_duplicate(r: dict, rules: list[dict]) -> bool:
                 and re.fullmatch(recommendation_pattern, recommendation, re.I))
 
 
+def _repeats_vague_duties(r: dict, rules: list[dict]) -> bool:
+    """Не повторяем общий вопрос о должностных обязанностях из правила.
+
+    Отбрасываем только замечание о том же поле и фрагменте. Это намеренно
+    консервативно: если в одной фразе есть ещё один вопрос, он тоже может исчезнуть.
+    """
+    if r.get("source") != "ai" or r.get("topic") != "Обязанности":
+        return False
+    text = f"{r.get('problem', '')} {r.get('recommendation', '')}"
+    if not re.search(r"должностн\w*\s+обязанност\w*", text, re.I):
+        return False
+    quote = str(r.get("quote", "")).casefold()
+    return any(x.get("source") == "rule" and x.get("topic") == "Обязанности"
+               and x.get("field") == r.get("field") and x.get("quote")
+               and str(x.get("quote")).casefold() in quote
+               and str(x.get("problem", "")).startswith("Формулировка обязанностей")
+               for x in rules)
+
+
+def _merge_fallback(remarks: list[dict], v: dict) -> None:
+    """Добавить fallback, не повторяя вопрос о сумме, уже заданный правилом."""
+    seen = {_key(r) for r in remarks}
+    pay_covered = any(r.get("source") == "rule" and r.get("topic") == "Оплата" and
+                      str(r.get("problem", "")).startswith(("Не указана оплата", "Не удалось найти сумму оплаты",
+                                                            "Оплата описана расплывчато"))
+                      for r in remarks)
+    for r in FallbackAnalyzer().analyze(v):
+        if pay_covered and r.get("topic") == "Оплата":
+            continue
+        key = _key(r)
+        if key not in seen:
+            remarks.append(r)
+            seen.add(key)
+
+
 def _question_options(r: dict) -> dict[str, str] | None:
     """Два редакторских вопроса только для известных срабатываний правил.
 
@@ -92,9 +127,10 @@ def _question_options(r: dict) -> dict[str, str] | None:
                                        problem.startswith("Место указано общо")):
         choices = ("Укажите город и адрес или район места работы.",
                    "Уточните город, место и формат работы: в офисе или удалённо.")
-    elif topic == "Тип занятости" and problem.startswith("Не указан тип занятости"):
-        choices = ("Укажите тип занятости: полная или частичная.",
-                   "Уточните тип занятости и предполагаемую длительность работы.")
+    elif topic == "Тип занятости" and (problem.startswith("Не указан тип занятости") or
+                                        problem.startswith("Не удалось найти тип занятости")):
+        choices = ("Проверьте и укажите тип занятости: полная или частичная.",
+                   "Проверьте и уточните тип занятости и предполагаемую длительность работы.")
     return dict(zip(("A", "B"), choices)) if choices else None
 
 
@@ -147,7 +183,7 @@ def analyze_vacancy(v: dict, ai_cfg: dict, ai_analyzer=None) -> tuple[list[dict]
             for r in ai_remarks:
                 content_key = _ai_content_key(r) if r.get("source") == "ai" else None
                 if (_key(r) in seen or (content_key and content_key in seen_ai_content)
-                        or _generic_missing_duplicate(r, remarks)):
+                        or _generic_missing_duplicate(r, remarks) or _repeats_vague_duties(r, remarks)):
                     log.info("Повтор замечания ИИ пропущен для вакансии %s", v.get("id", ""))
                     continue
                 remarks.append(r)
@@ -157,22 +193,14 @@ def analyze_vacancy(v: dict, ai_cfg: dict, ai_analyzer=None) -> tuple[list[dict]
         except Exception as exc:  # модель недоступна -> fallback, отчёт не теряем
             log.warning("ИИ недоступен (%s) — fallback", exc)
             try:
-                fb = FallbackAnalyzer().analyze(v)
-                seen = {_key(r) for r in remarks}
-                for r in fb:
-                    if _key(r) not in seen:
-                        remarks.append(r)
+                _merge_fallback(remarks, v)
                 status = "mixed" if selected else "fallback"
             except Exception:
                 status = "fallback-error"
     else:
         # Даже без модели fallback-лексикон дополняет правила
         try:
-            fb = FallbackAnalyzer().analyze(v)
-            seen = {_key(r) for r in remarks}
-            for r in fb:
-                if _key(r) not in seen:
-                    remarks.append(r)
+            _merge_fallback(remarks, v)
             status = "fallback"
         except Exception:
             status = "off"

@@ -170,6 +170,25 @@ def _validate_remark(r: dict, v: dict) -> tuple[dict | None, str | None]:
         r"\s*(?:перечислите|уточните)\s+конкретные\s+обязанности(?:,?\s+которые\s+нужно\s+выполнять\s+в\s+рамках\s+работы)?\s*[.!?]*\s*", rec, re.I)
     if topic == "Обязанности" and generic_duties_problem and generic_duties_rec:
         return None, "generic_duties_question"
+    # Если фрагмент уже говорит, что опыт приветствуется, общий вопрос «нужен
+    # ли опыт» обычно не добавляет сведений. При признаках обязательного опыта
+    # в других полях не фильтруем: возможно, именно их нужно сопоставить.
+    preferred_experience = re.search(r"опыт\s+работы[^.!?;]{0,100}?приветствуется", quote, re.I)
+    generic_experience_question = re.fullmatch(
+        r"\s*уточните,?\s+требуется\s+ли\s+опыт\s+работы(?:\s+по\s+[^.!?]{1,100})?\s*[.!?]*\s*", rec, re.I)
+    mandatory_experience = re.search(
+        r"(?:требуется|необходим\w*|обязател\w*)\s+(?:\w+\s+){0,3}опыт|"
+        r"опыт[^.!?;]{0,100}?(?:обязател\w*|необходим\w*|требуется|от\s+\d)",
+        " ".join(fields.values()), re.I)
+    structured_experience = v.get("requirement_experience", "")
+    if (topic == "Требования" and preferred_experience and generic_experience_question
+            and not mandatory_experience and structured_experience in (None, "", "0")):
+        return None, "experience_preference_already_stated"
+    # Один воспроизведённый дефект грамматики: модель пропускает предлог и
+    # неверно согласует «организации ... взаимодействовать». Это не универсальная
+    # проверка грамматики; свободные ответы всё равно должен проверять редактор.
+    if re.search(r"\bкакие\b[^.!?]{0,100}\bорганизации\s+нужно\s+взаимодействовать\b", rec, re.I):
+        return None, "invalid_interaction_wording"
     # Не утверждаем, что продолжительность дня неясна, если в одном из полей
     # уже есть интервал начала и окончания. Это консервативная эвристика:
     # она может пропустить обоснованное уточнение, например про перерывы.
