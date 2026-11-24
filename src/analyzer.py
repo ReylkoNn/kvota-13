@@ -52,6 +52,25 @@ def _generic_missing_duplicate(r: dict, rules: list[dict]) -> bool:
                 and re.fullmatch(recommendation_pattern, recommendation, re.I))
 
 
+def _repeats_experience_question(r: dict, rules: list[dict]) -> bool:
+    """Не дублировать уже обоснованное двумя полями общее уточнение об опыте."""
+    if (r.get("source") != "ai" or r.get("topic") != "Требования"
+            or r.get("field") != "requirement.qualification"):
+        return False
+    rec = str(r.get("recommendation", ""))
+    if not re.fullmatch(r"\s*уточните,?\s+требуется\s+ли\s+опыт\s+работы(?:\s+по\s+[^.!?]{1,100})?\s*[.!?]*\s*", rec, re.I):
+        return False
+    quote = str(r.get("quote", "")).casefold()
+    for x in rules:
+        if (x.get("source") == "rule" and x.get("topic") == "Требования"
+                and x.get("field") == "requirement.qualification | requirement.experience"
+                and str(x.get("problem", "")).startswith("В тексте опыт назван желательным")):
+            preferred = str(x.get("quote", "")).split(" | ", 1)[0].casefold()
+            if preferred and preferred in quote:
+                return True
+    return False
+
+
 def _repeats_vague_duties(r: dict, rules: list[dict]) -> bool:
     """Не повторяем общий вопрос о должностных обязанностях из правила.
 
@@ -183,7 +202,8 @@ def analyze_vacancy(v: dict, ai_cfg: dict, ai_analyzer=None) -> tuple[list[dict]
             for r in ai_remarks:
                 content_key = _ai_content_key(r) if r.get("source") == "ai" else None
                 if (_key(r) in seen or (content_key and content_key in seen_ai_content)
-                        or _generic_missing_duplicate(r, remarks) or _repeats_vague_duties(r, remarks)):
+                        or _generic_missing_duplicate(r, remarks) or _repeats_vague_duties(r, remarks)
+                        or _repeats_experience_question(r, remarks)):
                     log.info("Повтор замечания ИИ пропущен для вакансии %s", v.get("id", ""))
                     continue
                 remarks.append(r)

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from .normalize import _ALIASES
+from .normalize import _ALIASES, _num
 
 TOPIC_ORDER = ["Название", "Обязанности", "Требования", "Оплата", "График",
                "Место работы", "Тип занятости", "Описание"]
@@ -138,6 +138,19 @@ def analyze_rules(v: dict) -> list[dict]:
         out.append(_r("Требования", "requirements", "",
                       "Не понятно, нужен ли опыт и какое образование требуется.",
                       "Явно укажите требуемый опыт (в годах) и уровень образования или «без опыта».", "средняя"))
+
+    # Сопоставляем два конкретных поля API, не приписывая числу опыта единицы
+    # измерения и не объявляя это противоречием: смысл кода может меняться.
+    preferred = re.search(r"опыт\s+работы[^.!?;]{0,100}?приветствуется", qualification, re.I)
+    requirement_raw = v.get("raw", {}).get("requirement", {})
+    raw_experience = requirement_raw.get("experience") if isinstance(requirement_raw, dict) else None
+    if (preferred and not re.search(r"не\s+приветствуется$", preferred.group(), re.I)
+            and _num(experience) is not None and isinstance(raw_experience, (int, float, str))
+            and not isinstance(raw_experience, bool)):
+        out.append(_r("Требования", "requirement.qualification | requirement.experience",
+                      f"{preferred.group()} | {raw_experience}",
+                      "В тексте опыт назван желательным, а в отдельном поле опыта задано значение; их связь неясна.",
+                      "Проверьте поле опыта и уточните, является ли опыт обязательным или желательным.", "средняя"))
 
     # --- Оплата ---
     smin, smax = v.get("salary_min"), v.get("salary_max")
