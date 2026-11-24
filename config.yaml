@@ -30,3 +30,16 @@ ai:
   temperature: 0.3
   # Сколько вакансий максимум прогонять через модель за один запуск (защита от долгого ожидания на CPU).
   max_vacancies_for_ai: 40
+
+# Настройки командной точки входа main.py (расписание и ретраи коллеги).
+source:
+  url: "http://opendata.trudvsem.ru/api/v1/vacancies/region/3900000000000"
+  page_size: 20
+  max_vacancies: 40
+  max_pages: 10
+  max_retries: 3  # всего попыток, включая первую
+  retry_delay_seconds: 5
+schedule:
+  every_hours: 24
+output:
+  report_path: "reports/report.json"
