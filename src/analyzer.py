@@ -65,6 +65,7 @@ def analyze_batch(vacancies: list[dict], ai_cfg: dict) -> tuple[list[dict], str]
     max_ai = int(ai_cfg.get("max_vacancies_for_ai", 40))
     results, statuses = [], []
     for i, v in enumerate(vacancies):
+        log.info("Анализ вакансии %d/%d (ID: %s)", i + 1, len(vacancies), v.get("id", ""))
         cfg = dict(ai_cfg)
         if i >= max_ai:  # защита от долгого ожидания на CPU
             cfg = {**ai_cfg, "enabled": False}

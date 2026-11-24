@@ -6,7 +6,7 @@
 объединяются с правилами в analyzer.py и влияют на итоговый отчёт.
 
 Режимы (config.yaml -> ai.provider / env AI_PROVIDER):
-  local — Gemma локально через Transformers (бесплатно, без аккаунта);
+  local — модель через Transformers (для доступа к Gemma может потребоваться аккаунт);
   api   — OpenAI-совместимый API (бесплатные OpenRouter/Groq/AI Studio);
   off   — без модели, только fallback-шаблоны.
 
@@ -22,20 +22,27 @@ import os
 import re
 import urllib.request
 
+from .normalize import _ALIASES
+from .rules import TOPIC_ORDER
+
 log = logging.getLogger("kvota13.ai")
 
 SYSTEM_PROMPT = (
-    "Ты редактор вакансий. Прочитай вакансию и найди формулировки, из-за которых "
-    "соискатель не понимает условия работы: пропуски, неоднозначности, противоречия. "
-    "Проверь название, обязанности, требования, оплату, график, место работы, тип занятости. "
-    "Правила: не выдумывай факты; не делай выводов о нарушении закона; цитата quote должна быть "
-    "точной подстрокой из текста вакансии, а для пропуска quote пустой; для противоречия quote "
-    "содержит оба значения через ' | '. "
-    "Верни ТОЛЬКО JSON-массив объектов: "
-    '{"topic": "...", "field": "...", "quote": "...", "problem": "...", "recommendation": "...", "severity": "высокая|средняя|низкая"}. '
-    "topic — одно из: Название, Обязанности, Требования, Оплата, График, Место работы, Тип занятости, Описание. "
-    "field — имя поля источника (например vacancyName, duties, requirements, salary, scheduleType, workPlace, employmentType, description). "
-    "Если проблем нет, верни []."
+    "Ты редактор вакансий. Найди только конкретные неоднозначные формулировки "
+    "в предоставленных полях, которые мешают понять условия работы. Сопоставь все поля "
+    "между собой: если адрес, график, оплата или другие сведения уже указаны в другом поле, "
+    "не утверждай, что они отсутствуют. Не придумывай противоречия, факты или требования. "
+    "Пропуски и противоречия проверяют отдельные правила: не сообщай о них. "
+    "Если формулировка понятна или ты сомневаешься, верни []. "
+    "Для каждого замечания скопируй field точно из ключа переданного JSON, "
+    "а quote — точную непустую подстроку именно значения этого поля. "
+    "Укажи в problem, что непонятно именно в цитате, а в recommendation — конкретный вопрос "
+    "или уточнение без добавления фактов. Верни только JSON-массив объектов: "
+    '{"topic":"График","field":"description","quote":"...",'
+    '"problem":"...","recommendation":"...","severity":"средняя"}. '
+    "topic — одно из: Название, Обязанности, Требования, Оплата, График, "
+    "Место работы, Тип занятости, Описание. "
+    "Если обоснованных замечаний нет, верни []."
 )
 
 # Лексикон неоднозначных формулировок для fallback (и как подсказка модели не нужен)
@@ -57,38 +64,89 @@ _AMBIGUOUS = [
 ]
 
 
+# Поддерживаем только поля вакансии, а не служебные ID, ссылки и данные работодателя.
+_TOPIC_KEYS = {
+    "Название": ("title",),
+    "Обязанности": ("duties",),
+    "Требования": ("requirements",),
+    "Оплата": ("salary_text",),
+    "График": ("schedule_type", "schedule_text"),
+    "Место работы": ("workplace", "address", "city"),
+    "Тип занятости": ("employment_type",),
+    "Описание": ("description",),
+}
+_EXTRA_FIELDS = {"salaryMin", "salaryMax", "salary_min", "salary_max", "salary_from",
+                 "salary_to", "salaryFrom", "salaryTo", "minSalary", "maxSalary",
+                 "зарплатаОт", "зарплатаДо", "addresses"}
+
+
+def _flatten_source(value, path: str, out: dict[str, str]) -> None:
+    """Пути соответствуют исходному JSON, например addresses.address[0].location."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _flatten_source(item, f"{path}.{key}", out)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _flatten_source(item, f"{path}[{index}]", out)
+    elif isinstance(value, str) and value.strip():
+        out[path] = value
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        out[path] = str(value)
+
+
+def _source_fields(v: dict) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    relevant = {key for group in _TOPIC_KEYS.values() for canon in group
+                for key in _ALIASES[canon]} | set(_ALIASES["description"]) | _EXTRA_FIELDS
+    for key, value in v.get("raw", {}).items():
+        if key in relevant:
+            _flatten_source(value, key, fields)
+    return fields
+
+
 def _vacancy_text(v: dict) -> str:
-    parts = []
-    for label, key in [("Название", "title"), ("Компания", "company"), ("Описание", "description"),
-                       ("Обязанности", "duties"), ("Требования", "requirements"),
-                       ("Оплата (текст)", "salary_text"), ("График", "schedule_type"),
-                       ("Тип занятости", "employment_type"), ("Место работы", "workplace"),
-                       ("Адрес", "address"), ("Город", "city")]:
-        if v.get(key):
-            parts.append(f"{label}: {v[key]}")
-    if v.get("salary_min") is not None or v.get("salary_max") is not None:
-        parts.append(f"Оплата (поля): от {v.get('salary_min')} до {v.get('salary_max')}")
-    return "\n".join(parts)
+    # Модель видит точные имена полей и исходные значения, не синтетические метки.
+    return json.dumps(_source_fields(v), ensure_ascii=False, indent=2)
 
 
 def _valid_remark(r: dict, v: dict) -> dict | None:
+    """Консервативный фильтр: привязка к источнику, а не проверка смысла ИИ."""
     if not isinstance(r, dict):
         return None
-    topic = str(r.get("topic", "")).strip()
-    field = str(r.get("field", "")).strip()
-    quote = str(r.get("quote", "")).strip()
-    problem = str(r.get("problem", "")).strip()
-    rec = str(r.get("recommendation", "")).strip()
-    if not topic or not problem or not rec:
+    if any(not isinstance(r.get(k), str) for k in ("topic", "field", "quote", "problem", "recommendation")):
         return None
-    # Цитата обязана быть из источника (кроме пропуска и противоречия с разделителем)
-    if quote and any(part not in v.get("all_text", "") for part in quote.split(" | ")):
+    topic, field, quote, problem, rec = (r[k].strip() for k in
+                                        ("topic", "field", "quote", "problem", "recommendation"))
+    fields = _source_fields(v)
+    if topic not in TOPIC_ORDER or not field or not quote or not problem or not rec:
+        return None
+    if field not in fields or quote not in fields[field]:
+        return None
+    # Противоречия/пропуски оставлены правилам: модель не всегда приводит оба значения.
+    if re.search(r"противореч|несовместим", problem + " " + rec, re.I):
+        return None
+    root = re.split(r"[.\[]", field, maxsplit=1)[0]
+    allowed = {alias for canon in _TOPIC_KEYS[topic] for alias in _ALIASES[canon]}
+    allowed.update(_ALIASES["description"])
+    if topic == "Оплата":
+        allowed.update(_EXTRA_FIELDS - {"addresses"})
+    if topic == "Место работы":
+        allowed.add("addresses")
+    if root not in allowed:
         return None
     sev = str(r.get("severity", "средняя")).lower()
     if sev not in ("высокая", "средняя", "низкая"):
         sev = "средняя"
-    return {"topic": topic, "field": field or "description", "quote": quote,
+    return {"topic": topic, "field": field, "quote": quote,
             "problem": problem, "recommendation": rec, "severity": sev, "source": "ai"}
+
+
+def _accepted_remarks(text: str, v: dict) -> list[dict]:
+    candidates = _parse_model_json(text)
+    remarks = [valid for r in candidates if (valid := _valid_remark(r, v)) is not None]
+    log.info("Ответ модели по вакансии %s: предложено %d, принято %d", v.get("id", ""),
+             len(candidates), len(remarks))
+    return remarks
 
 
 def _parse_model_json(text: str) -> list[dict]:
@@ -128,7 +186,7 @@ class FallbackAnalyzer:
 
 
 class GemmaLocalAnalyzer:
-    """Gemma через Transformers (локально, без аккаунта и ключей)."""
+    """Локальная модель через Transformers; доступ к весам определяется поставщиком."""
 
     name = "gemma-local"
 
@@ -161,23 +219,27 @@ class GemmaLocalAnalyzer:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": f"Вакансия:\n{text}\n\nВерни JSON-массив замечаний."},
         ]
+        # Используем уже загруженный токенизатор, не проверяя сеть для каждой вакансии.
+        tokenizer = getattr(pipe, "tokenizer", None)
         try:
-            from transformers import AutoTokenizer
-            tok = AutoTokenizer.from_pretrained(self.model_name)
-            prompt = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            if tokenizer is None:
+                raise ValueError("Токенизатор отсутствует")
+            prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         except Exception:
-            prompt = f"{SYSTEM_PROMPT}\n\nВакансия:\n{text}\n\nВерни JSON-массив замечаний."
+            # Gemma не всегда поддерживает system role; объединяем инструкции с user.
+            merged = [{"role": "user", "content": SYSTEM_PROMPT + "\n\n" + messages[1]["content"]}]
+            try:
+                if tokenizer is None:
+                    raise ValueError("Токенизатор отсутствует")
+                prompt = tokenizer.apply_chat_template(merged, tokenize=False, add_generation_prompt=True)
+            except Exception:
+                prompt = merged[0]["content"]
         result = pipe(prompt, max_new_tokens=self.max_new_tokens,
                       do_sample=self.temperature > 0,
                       temperature=self.temperature if self.temperature > 0 else None,
                       return_full_text=False)
         generated = result[0]["generated_text"] if result else ""
-        remarks = []
-        for r in _parse_model_json(generated):
-            ok = _valid_remark(r, v)
-            if ok:
-                remarks.append(ok)
-        return remarks
+        return _accepted_remarks(generated, v)
 
 
 class ApiAnalyzer:
@@ -206,12 +268,7 @@ class ApiAnalyzer:
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         content = data["choices"][0]["message"]["content"]
-        remarks = []
-        for r in _parse_model_json(content):
-            ok = _valid_remark(r, v)
-            if ok:
-                remarks.append(ok)
-        return remarks
+        return _accepted_remarks(content, v)
 
 
 def build_ai_analyzer(ai_cfg: dict):
