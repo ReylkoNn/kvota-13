@@ -12,7 +12,7 @@ from app.integration import analyze_raw_vacancies
 # Импорты для Льва
 from app.fetch import fetch_vacancies, load_local, ApiError
 
-from app.report import save_integrated_report
+from app.report import deduplicate_issues, save_integrated_report
 
 # Настройка логов
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,7 +20,11 @@ logger = logging.getLogger(__name__)
 
 def run_pipeline(raw_data, mode, cfg):
     # Анализатор получает исходные вакансии и сохраняет точные поля для цитат.
-    return analyze_raw_vacancies(raw_data, cfg['ai'])
+    results, status = analyze_raw_vacancies(raw_data, cfg['ai'], mode, cfg.get('cache'),
+                                           (cfg['output']['report_path'], cfg.get('error_report', 'report_error.json')))
+    for vacancy in results:
+        vacancy['remarks'] = deduplicate_issues(vacancy['remarks'])
+    return results, status
 
 
 def write_report(results, ai_status, mode, cfg):

@@ -228,9 +228,11 @@ def analyze_vacancy(v: dict, ai_cfg: dict, ai_analyzer=None) -> tuple[list[dict]
     return remarks, status
 
 
-def analyze_batch(vacancies: list[dict], ai_cfg: dict) -> tuple[list[dict], str]:
+def analyze_batch(vacancies: list[dict], ai_cfg: dict, analyzer_wrapper=None) -> tuple[list[dict], str]:
     """Анализ списка вакансий. Возвращает (результаты для отчёта, общий ai_status)."""
     analyzer, _ = build_ai_analyzer(ai_cfg) if ai_cfg.get("enabled", True) else (None, "off")
+    if analyzer_wrapper and analyzer is not None and getattr(analyzer, "name", "") != "fallback":
+        analyzer = analyzer_wrapper(analyzer)
     max_ai = int(ai_cfg.get("max_vacancies_for_ai", 40))
     results, statuses = [], []
     for i, v in enumerate(vacancies):
@@ -238,10 +240,18 @@ def analyze_batch(vacancies: list[dict], ai_cfg: dict) -> tuple[list[dict], str]
         cfg = dict(ai_cfg)
         if i >= max_ai:  # защита от долгого ожидания на CPU
             cfg = {**ai_cfg, "enabled": False}
+        begin = getattr(analyzer, "begin_vacancy", None)
+        finish = getattr(analyzer, "finish_vacancy", None)
+        if callable(begin):
+            begin()
         remarks, st = analyze_vacancy(v, cfg, ai_analyzer=analyzer)
+        cache_used = bool(finish(st == getattr(analyzer, "name", None))) if callable(finish) else False
         statuses.append(st)
-        results.append({"id": v.get("id", ""), "url": v.get("url", "") or None,
-                        "title": v.get("title", ""), "ai_status": st, "remarks": remarks})
+        result = {"id": v.get("id", ""), "url": v.get("url", "") or None,
+                  "title": v.get("title", ""), "ai_status": st, "remarks": remarks}
+        if cache_used:
+            result["ai_cache_hit"] = True
+        results.append(result)
     # Общий статус: если хоть где-то сработала модель — показываем её
     overall = statuses[0] if statuses and len(set(statuses)) == 1 else ("mixed" if statuses else "off")
     return results, overall

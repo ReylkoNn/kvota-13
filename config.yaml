@@ -43,3 +43,8 @@ schedule:
   every_hours: 24
 output:
   report_path: "reports/report.json"
+# Кэш только для API/schedule; check всегда выполняет модель заново.
+cache:
+  enabled: true
+  path: "reports/ai-cache-v1.json"
+  max_entries: 2000

@@ -1,10 +1,11 @@
 {
-  "generated_at": "2026-11-24T22:00:48.931450+00:00",
+  "generated_at": "2026-11-24T22:30:06.529024+00:00",
   "mode": "check",
   "model": null,
   "requested_model": null,
   "ai_status": "fallback",
   "total": 10,
+  "ai_cache_hits": 0,
   "ai_generated_issues": 0,
   "ai_selected_recommendations": 0,
   "vacancies": [
@@ -13,6 +14,7 @@
       "url": "",
       "title": "Специалист по документообороту",
       "ai_status": "fallback",
+      "ai_cache_hit": false,
       "issues": []
     },
     {
@@ -20,6 +22,7 @@
       "url": "",
       "title": "Помощник администратора",
       "ai_status": "fallback",
+      "ai_cache_hit": false,
       "issues": [
         {
           "topic": "Оплата",
@@ -46,6 +49,7 @@
       "url": "",
       "title": "Младший аналитик данных",
       "ai_status": "fallback",
+      "ai_cache_hit": false,
       "issues": []
     },
     {
@@ -53,13 +57,25 @@
       "url": "",
       "title": "Оператор контактного центра",
       "ai_status": "fallback",
-      "issues": []
+      "ai_cache_hit": false,
+      "issues": [
+        {
+          "topic": "Место работы",
+          "field": "duty | requirement.qualification",
+          "quote": "полностью дистанционная | Обязательное ежедневное присутствие в офисе",
+          "problem": "Полностью дистанционная работа и обязательное присутствие в офисе могут не сочетаться.",
+          "recommendation": "Проверьте оба условия и уточните формат работы.",
+          "severity": "средняя",
+          "source": "rule"
+        }
+      ]
     },
     {
       "id": "DEMO-39-005",
       "url": "",
       "title": "Библиотекарь",
       "ai_status": "fallback",
+      "ai_cache_hit": false,
       "issues": []
     },
     {
@@ -67,6 +83,7 @@
       "url": "",
       "title": "Специалист",
       "ai_status": "fallback",
+      "ai_cache_hit": false,
       "issues": [
         {
           "topic": "Название",
@@ -84,6 +101,7 @@
       "url": "",
       "title": "Инженер технической поддержки",
       "ai_status": "fallback",
+      "ai_cache_hit": false,
       "issues": []
     },
     {
@@ -91,14 +109,15 @@
       "url": "",
       "title": "Координатор проектов",
       "ai_status": "fallback",
+      "ai_cache_hit": false,
       "issues": [
         {
           "topic": "График",
-          "field": "schedule",
-          "quote": "Гибкий график",
-          "problem": "Формулировка «гибкий график» не даёт конкретного расписания: дни и смены не понятны.",
-          "recommendation": "Уточните дни недели, часы и смену (например, «5/2, с 09:00 до 18:00, смена 1»).",
-          "severity": "высокая",
+          "field": "requirement.qualification",
+          "quote": "гибкий график без уточнения правил",
+          "problem": "Указаны часы или дни, но правила гибкого графика не уточнены.",
+          "recommendation": "Уточните, какие часы или дни можно менять и как согласуется гибкий график.",
+          "severity": "средняя",
           "source": "rule"
         }
       ]
@@ -108,6 +127,7 @@
       "url": "",
       "title": "Оператор ввода данных",
       "ai_status": "fallback",
+      "ai_cache_hit": false,
       "issues": []
     },
     {
@@ -115,6 +135,7 @@
       "url": "",
       "title": "Методист образовательных программ",
       "ai_status": "fallback",
+      "ai_cache_hit": false,
       "issues": []
     }
   ]

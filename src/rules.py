@@ -184,7 +184,8 @@ def analyze_rules(v: dict) -> list[dict]:
 
     # --- График ---
     sched = f"{v.get('schedule_type','')} {v.get('schedule_text','')}"
-    sched_all = f"{sched} {desc}"
+    # Требования и обязанности иногда содержат дни/часы, а не только описание.
+    sched_all = f"{sched} {desc} {duties} {req} {qualification}"
     has_sched = bool(sched.strip()) or bool(re.search(r"смен|график|рабоч\w+ (день|недел)|пятиднев|2/2|5/2|1/1|пн|будн", sched_all, re.I))
     if not has_sched:
         out.append(_r("График", "scheduleType", "", "Не указан график работы.",
@@ -196,11 +197,18 @@ def analyze_rules(v: dict) -> list[dict]:
             out.append(_r("График", "scheduleType", hit,
                           f"Формулировка «{hit}» не даёт конкретного расписания: дни и смены не понятны.",
                           "Уточните дни недели, часы и смену (например, «5/2, с 09:00 до 18:00, смена 1»).", "высокая"))
+        elif hit and concrete:
+            unspecified = re.search(r"гибк\w*\s+график[^.!?;]{0,60}?без\s+уточнен\w*\s+правил", sched_all, re.I)
+            if unspecified:
+                out.append(_r("График", "scheduleType", unspecified.group(),
+                              "Указаны часы или дни, но правила гибкого графика не уточнены.",
+                              "Уточните, какие часы или дни можно менять и как согласуется гибкий график.", "средняя"))
 
     # --- Место работы ---
     place = f"{v.get('workplace','')} {v.get('address','')} {v.get('city','')}"
     place_all = f"{place} {desc}"
-    has_place = bool(place.strip()) or bool(re.search(r"калининград|удал[её]нн\w*|дистанционн\w*|на дому|адрес|ул\.|улица", place_all, re.I))
+    has_place = bool(place.strip()) or bool(re.search(r"калининград|удал[её]нн\w*|дистанционн\w*|на дому|адрес|ул\.|улица",
+                                                      f"{place_all} {duties} {req} {qualification}", re.I))
     if not has_place:
         out.append(_r("Место работы", "workPlace", "", "Не указано место работы.",
                       "Укажите город/адрес или возможность удалённой работы.", "высокая"))
@@ -210,12 +218,32 @@ def analyze_rules(v: dict) -> list[dict]:
             out.append(_r("Место работы", "workPlace", hit,
                           "Место указано общо («в офисе») без города/адреса.",
                           "Укажите город и адрес (или район) места работы.", "средняя"))
+        # Узкое сопоставление явной полностью удалённой работы с обязательным
+        # присутствием: обе цитаты оставляем в исходных полях, без вывода о нарушениях.
+        format_text = f"{desc} {duties} {req} {qualification}"
+        full_remote = re.search(r"полностью\s+(?:дистанционн\w*|удал[её]нн\w*)", format_text, re.I)
+        required_office = re.search(r"обязательн\w*\s+(?:ежедневн\w*\s+)?присутстви\w*\s+в\s+офисе", format_text, re.I)
+        office_negated = required_office and (
+            re.search(r"(?:не|без)\s+$", format_text[max(0, required_office.start()-15):required_office.start()], re.I)
+            or re.match(r"\s+не\s+(?:требуется|нужно|обязательно)", format_text[required_office.end():], re.I))
+        remote_negated = full_remote and (
+            re.search(r"(?:не|без)\s+$", format_text[max(0, full_remote.start()-15):full_remote.start()], re.I)
+            or re.match(r"\s+(?:работ\w*\s+)?не\s+(?:предусмотрен\w*|возможн\w*|допускается)",
+                        format_text[full_remote.end():], re.I))
+        if full_remote and required_office and not remote_negated and not office_negated:
+            remote_quote, office_quote = full_remote.group(), required_office.group()
+            remote_field = _source_for_quote(v, remote_quote, "description")
+            office_field = _source_for_quote(v, office_quote, "description")
+            fields = remote_field if remote_field == office_field else f"{remote_field} | {office_field}"
+            out.append(_r("Место работы", fields, f"{remote_quote} | {office_quote}",
+                          "Полностью дистанционная работа и обязательное присутствие в офисе могут не сочетаться.",
+                          "Проверьте оба условия и уточните формат работы.", "средняя"))
         remote_match = re.search(r"удал[её]нн\w*|дистанционн\w*", place_all, re.I)
         office_match = re.search(r"в офисе|на предприятии", place_all, re.I)
         negated_remote = remote_match and (
             re.search(r"(?:не|без)\s+(?:возможн\w*\s+)?$", place_all[max(0, remote_match.start() - 25):remote_match.start()], re.I)
             or re.match(r"\s+работ\w*\s+не\s+(?:предусмотрен\w*|возможн\w*)", place_all[remote_match.end():], re.I))
-        if remote_match and office_match and not negated_remote and not re.search(r"удал[её]нн\w*|дистанционн\w*", place, re.I):
+        if not (full_remote and required_office and not remote_negated and not office_negated) and remote_match and office_match and not negated_remote and not re.search(r"удал[её]нн\w*|дистанционн\w*", place, re.I):
             remote = remote_match.group()
             office = office_match.group()
             remote_field = _source_for_quote(v, remote, "description")
