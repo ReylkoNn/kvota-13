@@ -154,7 +154,7 @@ def _validate_remark(r: dict, v: dict) -> tuple[dict | None, str | None]:
     # Узкий фильтр для общей фразы из отчёта Gemma: когда уже есть конкретные
     # требования, неконкретная просьба повторить их ничего не уточняет. Это не
     # проверка истинности произвольного текста и не запрет конкретных вопросов.
-    req_text = v.get("requirements", "")
+    req_text = " ".join((v.get("requirements", ""), v.get("requirement_qualification", "")))
     concrete_req = bool(re.search(r"опыт|стаж|образован|знани|навык|умени|владени|разряд|категори", req_text, re.I)
                         or v.get("requirement_education")
                         or (v.get("requirement_experience") not in (None, "", "0")))
@@ -162,6 +162,14 @@ def _validate_remark(r: dict, v: dict) -> tuple[dict | None, str | None]:
     generic_rec = re.fullmatch(r"\s*(?:уточните|укажите)\s+требования\s+к\s+(?:работе|соискателю)\s*[.!?]*\s*", rec, re.I)
     if concrete_req and generic_problem and generic_rec:
         return None, "generic_requirements_already_present"
+    # Из реального отчёта: общая просьба перечислить обязанности без указания,
+    # что именно неясно в цитате, не добавляет полезного уточнения к правилам.
+    generic_duties_problem = re.fullmatch(
+        r"\s*не\s*ясны\s+конкретные\s+обязанности(?:,?\s+которые\s+нужно\s+выполнять\s+в\s+рамках\s+работы)?\s*[.!?]*\s*", problem, re.I)
+    generic_duties_rec = re.fullmatch(
+        r"\s*(?:перечислите|уточните)\s+конкретные\s+обязанности(?:,?\s+которые\s+нужно\s+выполнять\s+в\s+рамках\s+работы)?\s*[.!?]*\s*", rec, re.I)
+    if topic == "Обязанности" and generic_duties_problem and generic_duties_rec:
+        return None, "generic_duties_question"
     # Не утверждаем, что продолжительность дня неясна, если в одном из полей
     # уже есть интервал начала и окончания. Это консервативная эвристика:
     # она может пропустить обоснованное уточнение, например про перерывы.

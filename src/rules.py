@@ -93,10 +93,11 @@ def analyze_rules(v: dict) -> list[dict]:
     desc = v.get("description", "")
     duties = v.get("duties", "")
     req = v.get("requirements", "")
+    qualification = v.get("requirement_qualification", "")
     all_text = v.get("all_text", "")
     low = all_text.lower()
     duties_text = f"{duties} {desc}"
-    req_text = f"{req} {desc}"
+    req_text = f"{req} {qualification} {desc}"
 
     # --- Название ---
     if not title:
@@ -126,7 +127,7 @@ def analyze_rules(v: dict) -> list[dict]:
     nested = bool(v.get("requirement_education") or (experience and experience != "0"))
     req_hint = re.search(r"требован\w*|опыт|стаж|образован|знани\w*|навык|умени\w*|владени\w*|категор|разряд", req_text, re.I)
     soft = _has(_SOFT_SKILLS, req_text)
-    if not req.strip() and not req_hint and not soft and not nested:
+    if not (req.strip() or qualification.strip()) and not req_hint and not soft and not nested:
         out.append(_r("Требования", "requirements", "", "Не удалось найти требования к соискателю в полях вакансии.",
                       "Проверьте описание и укажите обязательные навыки, опыт и образование, если требуются.", "высокая"))
     elif soft and not req_hint and not nested:

@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover
 ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULTS = {
-    "source_url": "http://opendata.trudvsem.ru/api/v1/vacancies/region/39",
+    "source_url": "http://opendata.trudvsem.ru/api/v1/vacancies/region/3900000000000",
     "region": 39,
     "pages": 2,
     "page_size": 20,

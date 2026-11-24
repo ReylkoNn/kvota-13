@@ -59,13 +59,13 @@ def normalize_vacancy(raw: dict) -> dict:
         if canon == "company" and isinstance(val, dict):
             val = val.get("name")
         if isinstance(val, dict):
-            # requirement.education/experience обрабатываются отдельно ниже.
+            # Вложенные поля requirement обрабатываются отдельно ниже.
             val = None
         elif isinstance(val, list):
             val = "; ".join(str(x).strip() for x in val if isinstance(x, (str, int, float)) and str(x).strip())
         v[canon] = "" if val is None else str(val).strip()
     details = raw.get("requirement") if isinstance(raw.get("requirement"), dict) else {}
-    for field in ("education", "experience"):
+    for field in ("education", "experience", "qualification"):
         value = details.get(field)
         # Числовое 0 в поле опыта сохраняем как значение источника, а не трактуем как факт.
         v[f"requirement_{field}"] = "" if value is None or isinstance(value, (dict, list, bool)) else str(value).strip()
@@ -82,7 +82,7 @@ def normalize_vacancy(raw: dict) -> dict:
     # Объединённый текст для проверок «есть ли сведения хоть где-то»
     v["all_text"] = " ".join(
         x for x in [v["title"], v["description"], v["duties"], v["requirements"],
-                    v["requirement_education"], v["requirement_experience"],
+                    v["requirement_education"], v["requirement_experience"], v["requirement_qualification"],
                     v["salary_text"], v["schedule_type"], v["schedule_text"],
                     v["employment_type"], v["workplace"], v["address"], v["city"]] if x
     )
