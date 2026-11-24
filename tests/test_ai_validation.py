@@ -37,6 +37,14 @@ class TestModelValidation(unittest.TestCase):
         self.assertEqual(accepted["source"], "ai")
         self.assertEqual(accepted["quote"], "нестандартные часы")
 
+    def test_model_cannot_copy_prompt_example_into_unrelated_vacancy(self):
+        copied = remark(topic="Описание", quote="Возможны командировки",
+                        problem="Неясны частота и длительность командировок.",
+                        recommendation="Уточните частоту и длительность командировок.")
+        self.assertIsNone(_valid_remark(copied, self.v))
+        vacancy = normalize_vacancy({"description": "Возможны командировки."})
+        self.assertIsNotNone(_valid_remark(copied, vacancy))
+
     def test_user_cook_false_positive_invalid_field_and_topic(self):
         candidate = remark(topic="Работа", field="Работа",
                            quote="Опыт работы поваром от 2 лет, 4 разряд, медицинская книжка.",
