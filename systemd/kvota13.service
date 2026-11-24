@@ -1,0 +1,7 @@
+[Unit]
+Description=Квота-13: обновление отчёта по вакансиям (регион 39)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/kvota-13
+ExecStart=/usr/bin/python3 -m src.main fetch

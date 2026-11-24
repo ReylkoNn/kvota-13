@@ -1,0 +1,31 @@
+# Основной конфиг прототипа «Квота-13» (регион 39, Калининградская область)
+# Все пути — относительно корня репозитория. Ключи API — только в .env (см. .env.example).
+
+source_url: "http://opendata.trudvsem.ru/api/v1/vacancies/region/39"
+region: 39
+
+# Пагинация: обрабатываем минимум 2 страницы, если лимит и объём позволяют.
+pages: 2
+page_size: 20
+max_vacancies: 40
+timeout_sec: 30
+
+# Расписание рабочего режима (ежедневное расписание, локальное время сервера). Используется командой `schedule`.
+schedule_cron: "0 9 * * *"
+
+# Куда сохранять отчёт. При недоступности API этот файл НЕ перезаписывается.
+output_report: "report.json"
+error_report: "report_error.json"
+
+# --- ИИ (роль №2: Gemma через Transformers + fallback) ---
+ai:
+  enabled: true
+  # local  = Gemma локально через Transformers (доступ к весам может требовать аккаунт Hugging Face)
+  # api    = OpenAI-совместимый API (бесплатные варианты: OpenRouter / Groq / Google AI Studio)
+  # off    = только правила + fallback-шаблоны
+  provider: "local"
+  model: "google/gemma-2-2b-it"
+  max_new_tokens: 512
+  temperature: 0.3
+  # Сколько вакансий максимум прогонять через модель за один запуск (защита от долгого ожидания на CPU).
+  max_vacancies_for_ai: 40

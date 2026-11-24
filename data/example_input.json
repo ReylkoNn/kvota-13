@@ -1,0 +1,91 @@
+{
+  "results": {
+    "vacancies": [
+      {
+        "vacancy": {
+          "id": "1001",
+          "vacancyName": "Специалист по закупкам",
+          "companyName": "ГБУ «Пример»",
+          "salaryMin": null,
+          "salaryMax": null,
+          "salary": "по договорённости",
+          "employmentType": "Полная занятость",
+          "scheduleType": "Гибкий график",
+          "workPlace": "Калининград",
+          "address": "ул. Примерная, 1",
+          "description": "Ищем специалиста в дружный коллектив. Стабильная зарплата, своевременная оплата. Полный соцпакет.",
+          "duties": "Выполнение должностных обязанностей.",
+          "requirements": "Ответственность, коммуникабельность."
+        }
+      },
+      {
+        "vacancy": {
+          "id": "1002",
+          "vacancyName": "Повар 4 разряда",
+          "companyName": "МБУ «Пример»",
+          "salaryMin": 35000,
+          "salaryMax": 45000,
+          "salary": "35000–45000",
+          "employmentType": "Полная занятость",
+          "scheduleType": "5/2, 09:00–18:00",
+          "workPlace": "Калининград",
+          "address": "ул. Примерная, 5",
+          "description": "Приготовление блюд по меню, контроль качества, соблюдение санитарных норм.",
+          "duties": "Приготовление холодных и горячих блюд, контроль качества, соблюдение санитарных норм, ведение документации.",
+          "requirements": "Опыт работы поваром от 2 лет, 4 разряд, медицинская книжка."
+        }
+      },
+      {
+        "vacancy": {
+          "id": "1003",
+          "vacancyName": "Бухгалтер",
+          "companyName": "ГБУ «Пример»",
+          "salaryMin": 60000,
+          "salaryMax": 40000,
+          "salary": "60000–40000",
+          "employmentType": "Частичная занятость",
+          "scheduleType": "5/2",
+          "workPlace": "Калининград",
+          "address": "ул. Примерная, 7",
+          "description": "Работа бухгалтером на 40 часов в неделю, полный день.",
+          "duties": "Ведение бухгалтерского учёта, отчётность, сверки.",
+          "requirements": "Опыт от 3 лет, знание 1С."
+        }
+      },
+      {
+        "vacancy": {
+          "id": "1004",
+          "vacancyName": "Секретарь",
+          "companyName": "МБУ «Пример»",
+          "salaryMin": null,
+          "salaryMax": null,
+          "salary": "",
+          "employmentType": "",
+          "scheduleType": "",
+          "workPlace": "",
+          "address": "",
+          "description": "Требуется секретарь.",
+          "duties": "",
+          "requirements": ""
+        }
+      },
+      {
+        "vacancy": {
+          "id": "1005",
+          "vacancyName": "Оператор ЭВМ",
+          "companyName": "ГБУ «Пример»",
+          "salaryMin": 30000,
+          "salaryMax": 35000,
+          "salary": "30000–35000",
+          "employmentType": "Полная занятость",
+          "scheduleType": "5/2, 09:00–18:00",
+          "workPlace": "В офисе",
+          "address": "",
+          "description": "Возможна удалённая работа. Работа в офисе на предприятии.",
+          "duties": "Ввод данных, проверка документов, формирование отчётов.",
+          "requirements": "Опыт от 1 года, знание Excel."
+        }
+      }
+    ]
+  }
+}

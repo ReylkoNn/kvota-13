@@ -1,25 +1,10 @@
-# Python
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
-.Python
-env/
-venv/
 .venv/
-
-# Ursina / Panda3D кэш
-.panda3d/
-*.egg-info/
-build/
-dist/
-
-# Сохранения (не коммитим чужие)
-saves/*.json
-!saves/player_data.json
-
-# Билды
-builds/
-
-# VS Code
-.vscode/
+venv/
+.env
+report.json
+report_error.json
+output/
+*.log
