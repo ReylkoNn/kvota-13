@@ -36,15 +36,19 @@ def _question_options(r: dict) -> dict[str, str] | None:
         return None
     choices = None
     if topic == "Обязанности" and (problem.startswith("Не описаны обязанности") or
+                                     problem.startswith("Не удалось найти описание обязанностей") or
                                      problem.startswith("Формулировка обязанностей")):
         choices = ("Перечислите основные задачи сотрудника.",
                    "Уточните основные задачи сотрудника и зоны его ответственности.")
     elif topic == "Требования" and (problem.startswith("Не указаны требования") or
+                                       problem.startswith("Не удалось найти требования") or
+                                       problem.startswith("Указаны личные качества") or
                                        problem.startswith("Перечислены только личные качества") or
                                        problem.startswith("Не понятно, нужен ли опыт")):
         choices = ("Уточните обязательные навыки и требуемый опыт работы.",
                    "Уточните обязательные навыки и требования к образованию.")
     elif topic == "Оплата" and (problem.startswith("Не указана оплата") or
+                                 problem.startswith("Не удалось найти сумму оплаты") or
                                  problem.startswith("Оплата описана расплывчато")):
         choices = ("Укажите конкретную сумму или вилку оплаты.",
                    "Укажите сумму оплаты и условия, от которых зависит её размер.")

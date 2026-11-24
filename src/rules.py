@@ -45,8 +45,23 @@ def _has(patterns, text: str) -> str | None:
     return None
 
 
-def _numbers(text: str) -> list[int]:
-    return [int(x) for x in re.findall(r"\d[\d\s\u00a0]*", text or "") if x.strip()]
+def _has_pay_amount(v: dict) -> bool:
+    """Число в поле оплаты или сумма с валютой рядом с упоминанием оплаты.
+
+    Это эвристика, а не финансовый парсер: числа в произвольном описании
+    (например, адрес или стаж) не считаются зарплатой.
+    """
+    if v.get("salary_min") is not None or v.get("salary_max") is not None:
+        return True
+    amount = r"(?<!\d)[1-9]\d*(?:[ \u00a0]\d{3})*(?:[.,]\d+)?"
+    salary = v.get("salary_text", "")
+    if re.search(amount, salary):
+        return True
+    desc = v.get("description", "")
+    pay = r"зарплат\w*|заработн\w+\s+плат\w*|оплат\w*|оклад\w*|доход\w*"
+    currency = r"руб\w*|₽|тыс\w*"
+    return bool(re.search(rf"(?:{pay}).{{0,60}}?{amount}\s*(?:{currency})|"
+                          rf"{amount}\s*(?:{currency}).{{0,60}}?(?:{pay})", desc, re.I))
 
 
 def _source_name(v: dict, aliases: list[str], default: str) -> str:
@@ -54,9 +69,20 @@ def _source_name(v: dict, aliases: list[str], default: str) -> str:
     return next((name for name in aliases if name in raw and raw[name] not in (None, "")), default)
 
 
+def _source_strings(value, path=""):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from _source_strings(item, f"{path}.{key}" if path else key)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from _source_strings(item, f"{path}[{index}]")
+    elif isinstance(value, str):
+        yield path, value
+
+
 def _source_for_quote(v: dict, quote: str, default: str) -> str:
-    for name, value in v.get("raw", {}).items():
-        if isinstance(value, str) and quote in value:
+    for name, value in _source_strings(v.get("raw", {})):
+        if quote in value:
             return name
     return default
 
@@ -81,9 +107,12 @@ def analyze_rules(v: dict) -> list[dict]:
                       "Уточните специализацию в названии, например «Специалист по закупкам».", "средняя"))
 
     # --- Обязанности ---
-    if not duties.strip() and len(desc.strip()) < 40:
-        out.append(_r("Обязанности", "duties", "", "Не описаны обязанности: ни в поле обязанностей, ни в описании.",
-                      "Перечислите 3–7 конкретных задач (что именно делает сотрудник).", "высокая"))
+    duty_hint = re.search(r"обязанност\w*|задач\w*|функци\w*|"
+                          r"(?:готовить|приготовлени\w*|обслуживани\w*|продаж\w*|"
+                          r"контрол\w*|управлени\w*|разработк\w*|ведение|обеспечени\w*)", desc, re.I)
+    if not duties.strip() and not duty_hint:
+        out.append(_r("Обязанности", "duties", "", "Не удалось найти описание обязанностей в полях вакансии.",
+                      "Проверьте описание и перечислите конкретные задачи сотрудника.", "высокая"))
     else:
         hit = _has(_VAGUE_DUTIES, duties_text)
         if hit:
@@ -92,37 +121,41 @@ def analyze_rules(v: dict) -> list[dict]:
                           "Замените общую фразу списком конкретных задач и зон ответственности.", "средняя"))
 
     # --- Требования ---
-    if not req.strip() and len(desc.strip()) < 30:
-        out.append(_r("Требования", "requirements", "", "Не указаны требования к соискателю.",
-                      "Укажите обязательные навыки, опыт и образование (если требуются).", "высокая"))
-    else:
-        soft = [s for s in _SOFT_SKILLS if s in req_text.lower()]
-        concrete = bool(re.search(r"опыт|стаж|образован|знание|навык|умение|владение|категор|разряд|лет\b|\d+\s*лет", req_text, re.I))
-        if soft and not concrete:
-            out.append(_r("Требования", "requirements", ", ".join(soft),
-                          "Перечислены только личные качества без конкретных профессиональных требований.",
-                          "Добавьте конкретные навыки/опыт/образование, а личные качества оставьте дополнением.", "средняя"))
-        elif not re.search(r"опыт|стаж|образован|лет\b|\d+\s*лет", req_text, re.I):
-            out.append(_r("Требования", "requirements", "",
-                          "Не понятно, нужен ли опыт и какое образование требуется.",
-                          "Явно укажите требуемый опыт (в годах) и уровень образования или «без опыта».", "средняя"))
+    experience = v.get("requirement_experience", "")
+    # Значение 0 в данных источника может быть служебным, не утверждаем «без опыта».
+    nested = bool(v.get("requirement_education") or (experience and experience != "0"))
+    req_hint = re.search(r"требован\w*|опыт|стаж|образован|знани\w*|навык|умени\w*|владени\w*|категор|разряд", req_text, re.I)
+    soft = _has(_SOFT_SKILLS, req_text)
+    if not req.strip() and not req_hint and not soft and not nested:
+        out.append(_r("Требования", "requirements", "", "Не удалось найти требования к соискателю в полях вакансии.",
+                      "Проверьте описание и укажите обязательные навыки, опыт и образование, если требуются.", "высокая"))
+    elif soft and not req_hint and not nested:
+        out.append(_r("Требования", "requirements", soft,
+                      "Указаны личные качества; профессиональные требования не удалось определить автоматически.",
+                      "Проверьте и при необходимости добавьте профессиональные требования.", "средняя"))
+    elif not nested and not re.search(r"опыт|стаж|образован|лет\b|\d+\s*лет", req_text, re.I):
+        out.append(_r("Требования", "requirements", "",
+                      "Не понятно, нужен ли опыт и какое образование требуется.",
+                      "Явно укажите требуемый опыт (в годах) и уровень образования или «без опыта».", "средняя"))
 
     # --- Оплата ---
     smin, smax = v.get("salary_min"), v.get("salary_max")
     stext = v.get("salary_text", "")
     pay_text = f"{stext} {desc}"
-    has_pay = smin is not None or smax is not None or bool(stext.strip()) or bool(re.search(r"\d+\s*(руб|₽|тыс)", pay_text, re.I))
+    has_pay = _has_pay_amount(v)
     if not has_pay:
-        out.append(_r("Оплата", "salary", "", "Не указана оплата ни в полях, ни в описании.",
-                      "Укажите вилку оплаты (от–до) и что входит в сумму (оклад/премии).", "высокая"))
-    else:
         hit = _has(_VAGUE_PAY, pay_text)
-        if hit and smin is None and smax is None:
+        if hit:
             out.append(_r("Оплата", "salary", hit,
-                          "Оплата описана расплывчато, соискатель не может оценить доход.",
-                          "Укажите конкретную сумму или вилку, а не «по договорённости».", "высокая"))
-        elif re.search(r"\bот\s+\d+", pay_text, re.I) and smax is None and not re.search(r"до\s+\d+", pay_text, re.I):
-            out.append(_r("Оплата", "salary", stext or "«от …»",
+                          "Оплата описана расплывчато, сумма не найдена автоматически.",
+                          "Укажите конкретную сумму или вилку оплаты.", "высокая"))
+        else:
+            out.append(_r("Оплата", "salary", "", "Не удалось найти сумму оплаты в полях вакансии.",
+                          "Проверьте и укажите сумму или вилку оплаты и что входит в неё.", "высокая"))
+    elif smin is None and smax is None:
+        lower = re.search(r"\bот\s+\d[\d \u00a0]*", stext, re.I)
+        if lower and not re.search(r"\bдо\s+\d+", stext, re.I):
+            out.append(_r("Оплата", "salary", lower.group().rstrip(),
                           "Указан только нижний порог оплаты, верхний не понятен.",
                           "Укажите вилку «от–до» или условия, от которых зависит сумма.", "средняя"))
     if smin is not None and smax is not None and smin > smax:
@@ -153,20 +186,24 @@ def analyze_rules(v: dict) -> list[dict]:
     # --- Место работы ---
     place = f"{v.get('workplace','')} {v.get('address','')} {v.get('city','')}"
     place_all = f"{place} {desc}"
-    has_place = bool(place.strip()) or bool(re.search(r"калининград|удалённо|дистанционно|на дому|адрес|ул\.|улица", place_all, re.I))
+    has_place = bool(place.strip()) or bool(re.search(r"калининград|удал[её]нн\w*|дистанционн\w*|на дому|адрес|ул\.|улица", place_all, re.I))
     if not has_place:
         out.append(_r("Место работы", "workPlace", "", "Не указано место работы.",
                       "Укажите город/адрес или возможность удалённой работы.", "высокая"))
     else:
         hit = _has(_VAGUE_PLACE, place_all)
-        if hit and not re.search(r"калининград|ул\.|улица|адрес|удалённо|дистанционно", place_all, re.I):
+        if hit and not (v.get("city") or v.get("address")) and not re.search(r"калининград|ул\.|улица|адрес|удал[её]нн\w*|дистанционн\w*", place_all, re.I):
             out.append(_r("Место работы", "workPlace", hit,
                           "Место указано общо («в офисе») без города/адреса.",
                           "Укажите город и адрес (или район) места работы.", "средняя"))
-        if "удалённо" in place_all.lower() and re.search(r"в офисе|на предприятии", place_all, re.I) \
-                and "удалённо" not in place.lower():
-            remote = re.search(r"удалённо", place_all, re.I).group()
-            office = re.search(r"в офисе|на предприятии", place_all, re.I).group()
+        remote_match = re.search(r"удал[её]нн\w*|дистанционн\w*", place_all, re.I)
+        office_match = re.search(r"в офисе|на предприятии", place_all, re.I)
+        negated_remote = remote_match and (
+            re.search(r"(?:не|без)\s+(?:возможн\w*\s+)?$", place_all[max(0, remote_match.start() - 25):remote_match.start()], re.I)
+            or re.match(r"\s+работ\w*\s+не\s+(?:предусмотрен\w*|возможн\w*)", place_all[remote_match.end():], re.I))
+        if remote_match and office_match and not negated_remote and not re.search(r"удал[её]нн\w*|дистанционн\w*", place, re.I):
+            remote = remote_match.group()
+            office = office_match.group()
             remote_field = _source_for_quote(v, remote, "description")
             office_field = _source_for_quote(v, office, "workPlace")
             fields = remote_field if remote_field == office_field else f"{remote_field} | {office_field}"
@@ -196,15 +233,16 @@ def analyze_rules(v: dict) -> list[dict]:
                       "Описание слишком краткое и не раскрывает условия работы.",
                       "Добавьте описание задач, требований и условий (или заполните поля API).", "низкая"))
 
-    raw = v.get("raw", {})
     for remark in out:
         quote = remark["quote"]
         if quote and " | " not in quote:
-            for field, value in raw.items():
-                if isinstance(value, str):
-                    match = re.search(re.escape(quote), value, re.I)
-                    if match:
-                        remark["field"], remark["quote"] = field, match.group()
-                        break
+            for field, value in _source_strings(v.get("raw", {})):
+                match = re.search(re.escape(quote), value, re.I)
+                if match:
+                    remark["field"], remark["quote"] = field, match.group()
+                    break
+            else:
+                # Синтетическая нормализованная строка не является цитатой источника.
+                remark["quote"] = ""
     out.sort(key=lambda r: TOPIC_ORDER.index(r["topic"]) if r["topic"] in TOPIC_ORDER else 99)
     return out

@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .normalize import _ALIASES
-from .rules import TOPIC_ORDER
+from .rules import TOPIC_ORDER, _has_pay_amount
 
 log = logging.getLogger("kvota13.ai")
 
@@ -62,18 +62,16 @@ SYSTEM_PROMPT = (
 _AMBIGUOUS = [
     ("стабильная зарплата", "Оплата", "salary", "«Стабильная зарплата» не говорит о сумме.",
      "Укажите сумму или вилку оплаты."),
-    ("дружный коллектив", "Описание", "description", "«Дружный коллектив» не раскрывает условия работы.",
-     "Опишите задачи, график и условия вместо общих похвал."),
+    ("дружный коллектив", "Описание", "description", "Фраза «дружный коллектив» не конкретизирует условия работы.",
+     "Проверьте, достаточно ли конкретно описаны условия работы в других полях."),
     ("интересные задачи", "Обязанности", "duties", "«Интересные задачи» не показывает реальный объём работы.",
      "Перечислите конкретные задачи."),
-    ("возможность роста", "Описание", "description", "«Возможность роста» без условий вводит в заблуждение.",
-     "Укажите конкретные условия роста или уберите фразу."),
+    ("возможность роста", "Описание", "description", "Условия и направления роста не уточнены в этой фразе.",
+     "При необходимости уточните возможности и условия роста."),
     ("своевременная оплата", "Оплата", "salary", "«Своевременная оплата» не говорит о сумме.",
      "Укажите сумму или вилку оплаты."),
     ("полный соцпакет", "Описание", "description", "«Полный соцпакет» не раскрывает, что именно входит.",
      "Перечислите, что входит в соцпакет."),
-    ("официальное трудоустройство", "Тип занятости", "employmentType", "Не указан тип занятости и форма договора.",
-     "Укажите тип занятости и форму оформления."),
 ]
 
 
@@ -232,15 +230,18 @@ class FallbackAnalyzer:
 
     def analyze(self, v: dict) -> list[dict]:
         out = []
-        raw = v.get("raw", {})
+        fields = _source_fields(v)
         for phrase, topic, field, problem, rec in _AMBIGUOUS:
-            for actual_field, value in raw.items():
-                if not isinstance(value, str):
+            allowed = {alias for canon in _TOPIC_KEYS[topic] for alias in _ALIASES[canon]}
+            allowed.update(_ALIASES["description"])
+            for actual_field, value in fields.items():
+                root = re.split(r"[.\[]", actual_field, maxsplit=1)[0]
+                if root not in allowed:
                     continue
                 match = re.search(re.escape(phrase), value, re.I)
                 if not match:
                     continue
-                if topic == "Оплата" and (v.get("salary_min") or v.get("salary_max") or re.search(r"\d", v.get("salary_text", ""))):
+                if topic == "Оплата" and _has_pay_amount(v):
                     continue
                 out.append({"topic": topic, "field": actual_field, "quote": match.group(),
                             "problem": problem, "recommendation": rec,

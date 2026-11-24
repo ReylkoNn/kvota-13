@@ -72,7 +72,7 @@ class IntegrationTest(unittest.TestCase):
     def test_invalid_model_json_triggers_fallback_and_bad_quotes_rejected(self):
         with self.assertRaises(ValueError):
             _parse_model_json("not json")
-        v = normalize_vacancy({"id": "1", "description": "Стабильная зарплата"})
+        v = normalize_vacancy({"id": "1", "description": "Стабильная зарплата. Полный соцпакет."})
         bad = {"topic": "Оплата", "field": "description", "quote": "нет | выдумано", "problem": "x", "recommendation": "y"}
         self.assertIsNone(_valid_remark(bad, v))
         class BadModel:
