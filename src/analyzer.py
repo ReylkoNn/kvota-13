@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from .ai import FallbackAnalyzer, build_ai_analyzer
 from .rules import TOPIC_ORDER, analyze_rules
@@ -21,6 +22,34 @@ def _key(r: dict) -> tuple:
     return (clean(r.get("topic")), clean(r.get("field")), quote,
             "" if quote else clean(r.get("problem")))
 
+
+def _ai_content_key(r: dict) -> tuple:
+    """Полный повтор ответа ИИ по одному фрагменту, даже при разных темах."""
+    clean = lambda value: " ".join(str(value or "").casefold().split())
+    return tuple(clean(r.get(name)) for name in ("field", "quote", "problem", "recommendation"))
+
+
+def _generic_missing_duplicate(r: dict, rules: list[dict]) -> bool:
+    """Узкий случай: общая просьба об обязанностях и требованиях уже есть в правилах.
+
+    Не предполагает общую семантическую дедупликацию и не отбрасывает конкретные
+    уточнения об опыте, навыках или отдельных задачах.
+    """
+    if r.get("source") != "ai":
+        return False
+    missing = {x.get("topic") for x in rules if x.get("source") == "rule" and not x.get("quote")
+               and str(x.get("problem", "")).startswith(("Не удалось найти описание обязанностей",
+                                                          "Не удалось найти требования"))}
+    if not {"Обязанности", "Требования"} <= missing:
+        return False
+    problem = str(r.get("problem", ""))
+    recommendation = str(r.get("recommendation", ""))
+    problem_pattern = (r"\s*(?:необходимо|нужно|следует)\s+уточнить,?\s+какие\s+именно\s+"
+                       r"обязанности\s+и\s+требования(?:\s+(?:от|к|для)\s+[^.,;!?]{1,80})?\s*[.!?]*\s*")
+    recommendation_pattern = (r"\s*уточните\s+обязанности\s+и\s+требования"
+                              r"(?:\s+(?:от|к|для)\s+[^.,;!?]{1,80})?\s*[.!?]*\s*")
+    return bool(re.fullmatch(problem_pattern, problem, re.I)
+                and re.fullmatch(recommendation_pattern, recommendation, re.I))
 
 
 def _question_options(r: dict) -> dict[str, str] | None:
@@ -114,10 +143,17 @@ def analyze_vacancy(v: dict, ai_cfg: dict, ai_analyzer=None) -> tuple[list[dict]
             ai_remarks = analyzer.analyze(v)
             status = getattr(analyzer, "name", "ai")
             seen = {_key(r) for r in remarks}
+            seen_ai_content = set()
             for r in ai_remarks:
-                if _key(r) not in seen:
-                    remarks.append(r)
-                    seen.add(_key(r))
+                content_key = _ai_content_key(r) if r.get("source") == "ai" else None
+                if (_key(r) in seen or (content_key and content_key in seen_ai_content)
+                        or _generic_missing_duplicate(r, remarks)):
+                    log.info("Повтор замечания ИИ пропущен для вакансии %s", v.get("id", ""))
+                    continue
+                remarks.append(r)
+                seen.add(_key(r))
+                if content_key:
+                    seen_ai_content.add(content_key)
         except Exception as exc:  # модель недоступна -> fallback, отчёт не теряем
             log.warning("ИИ недоступен (%s) — fallback", exc)
             try:

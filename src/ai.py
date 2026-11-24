@@ -151,6 +151,17 @@ def _validate_remark(r: dict, v: dict) -> tuple[dict | None, str | None]:
         allowed.add("addresses")
     if root not in allowed:
         return None, "field_topic_mismatch"
+    # Узкий фильтр для общей фразы из отчёта Gemma: когда уже есть конкретные
+    # требования, неконкретная просьба повторить их ничего не уточняет. Это не
+    # проверка истинности произвольного текста и не запрет конкретных вопросов.
+    req_text = v.get("requirements", "")
+    concrete_req = bool(re.search(r"опыт|стаж|образован|знани|навык|умени|владени|разряд|категори", req_text, re.I)
+                        or v.get("requirement_education")
+                        or (v.get("requirement_experience") not in (None, "", "0")))
+    generic_problem = re.fullmatch(r"\s*(?:не\s*ясны|непонятны)\s+требования\s+к\s+(?:работе|соискателю)\s*[.!?]*\s*", problem, re.I)
+    generic_rec = re.fullmatch(r"\s*(?:уточните|укажите)\s+требования\s+к\s+(?:работе|соискателю)\s*[.!?]*\s*", rec, re.I)
+    if concrete_req and generic_problem and generic_rec:
+        return None, "generic_requirements_already_present"
     # Не утверждаем, что продолжительность дня неясна, если в одном из полей
     # уже есть интервал начала и окончания. Это консервативная эвристика:
     # она может пропустить обоснованное уточнение, например про перерывы.
